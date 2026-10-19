@@ -1,0 +1,36 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/Escrow.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity >=0.8.0 <0.9.0;\n\ninterface IERC20 {\n    function transfer(address to, uint256 value) external returns (bool);\n    function transferFrom(address from, address to, uint256 value) external returns (bool);\n    function balanceOf(address account) external view returns (uint256);\n}\n\ncontract Escrow {\n    enum Status { Created, Paid, Completed, Refunded, Disputed, Resolved }\n    \n    struct Order {\n        address buyer;\n        address seller;\n        address token;\n        uint256 amount;\n        uint256 deadline;\n        Status status;\n        string description;\n    }\n\n    address public arbiter;\n    uint256 public orderCount;\n    mapping(uint256 => Order) private _orders;\n\n    event OrderCreated(uint256 id, address buyer, address seller, address token, uint256 amount, uint256 deadline);\n    event OrderPaid(uint256 id);\n    event OrderCompleted(uint256 id);\n    event OrderRefunded(uint256 id);\n    event OrderDisputed(uint256 id);\n    event OrderResolved(uint256 id, bool sellerWins);\n\n    modifier onlyArbiter() {\n        require(msg.sender == arbiter, \"Escrow: caller is not the arbiter\");\n        _;\n    }\n\n    modifier onlyBuyer(uint256 id) {\n        require(msg.sender == _orders[id].buyer, \"Escrow: caller is not the buyer\");\n        _;\n    }\n\n    modifier inStatus(uint256 id, Status s) {\n        require(_orders[id].status == s, \"Escrow: wrong status\");\n        _;\n    }\n\n    constructor(address _arbiter) {\n        require(_arbiter != address(0), \"Escrow: arbiter is the zero address\");\n        arbiter = _arbiter;\n    }\n\n    function getOrder(uint256 id) public view returns (Order memory) {\n        require(id < orderCount, \"Escrow: order does not exist\");\n        return _orders[id];\n    }\n\n    // --- TODO 1: 创建订单 ---\n    function createOrder(address seller, address token, uint256 amount, uint256 deadline, string memory description) public returns (uint256) {\n        require(seller != address(0), \"Escrow: seller is the zero address\");\n        require(seller != msg.sender, \"Escrow: seller cannot be buyer\");\n        require(amount > 0, \"Escrow: amount must be > 0\");\n        require(deadline > block.timestamp, \"Escrow: deadline must be in the future\");\n\n        uint256 id = orderCount;\n        _orders[id] = Order(msg.sender, seller, token, amount, deadline, Status.Created, description);\n        orderCount++;\n        emit OrderCreated(id, msg.sender, seller, token, amount, deadline);\n        return id;\n    }\n\n    // --- TODO 2: 买家付款 ---\n    function deposit(uint256 id) public onlyBuyer(id) inStatus(id, Status.Created) {\n        Order storage o = _orders[id];\n        o.status = Status.Paid;\n        bool success = IERC20(o.token).transferFrom(msg.sender, address(this), o.amount);\n        require(success, \"Escrow: transferFrom failed\");\n        emit OrderPaid(id);\n    }\n\n    // --- TODO 3: 买家确认收货 ---\n    function confirm(uint256 id) public onlyBuyer(id) inStatus(id, Status.Paid) {\n        Order storage o = _orders[id];\n        o.status = Status.Completed;\n        bool success = IERC20(o.token).transfer(o.seller, o.amount);\n        require(success, \"Escrow: transfer failed\");\n        emit OrderCompleted(id);\n    }\n\n    // --- TODO 4: 超期退款 ---\n    function refund(uint256 id) public onlyBuyer(id) inStatus(id, Status.Paid) {\n        Order storage o = _orders[id];\n        require(block.timestamp > o.deadline, \"Escrow: deadline not reached\");\n        o.status = Status.Refunded;\n        bool success = IERC20(o.token).transfer(o.buyer, o.amount);\n        require(success, \"Escrow: transfer failed\");\n        emit OrderRefunded(id);\n    }\n\n    // --- TODO 5: 发起争议 ---\n    function dispute(uint256 id) public inStatus(id, Status.Paid) {\n        Order storage o = _orders[id];\n        require(msg.sender == o.buyer || msg.sender == o.seller, \"Escrow: caller not buyer or seller\");\n        o.status = Status.Disputed;\n        emit OrderDisputed(id);\n    }\n\n    // --- TODO 6: 仲裁 ---\n    function resolve(uint256 id, bool sellerWins) public onlyArbiter inStatus(id, Status.Disputed) {\n        Order storage o = _orders[id];\n        if (sellerWins) {\n            o.status = Status.Completed;\n            IERC20(o.token).transfer(o.seller, o.amount);\n        } else {\n            o.status = Status.Refunded;\n            IERC20(o.token).transfer(o.buyer, o.amount);\n        }\n        emit OrderResolved(id, sellerWins);\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "paris",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata",
+          "devdoc",
+          "userdoc",
+          "storageLayout",
+          "evm.gasEstimates"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    },
+    "metadata": {
+      "useLiteralContent": true
+    }
+  }
+}
